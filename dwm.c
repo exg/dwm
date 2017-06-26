@@ -119,7 +119,18 @@ typedef struct {
 	void (*arrange)(Monitor *);
 } Layout;
 
+typedef struct {
+	int nmaster;
+	float mfact;
+	unsigned int sellt;
+	const Layout *lt[2];
+	int showbar;
+	int showtab;
+} Config;
+
 struct Monitor {
+	unsigned int config_id;
+	Config *config;
 	char ltsymbol[16];
 	float mfact;
 	int nmaster;
@@ -240,6 +251,7 @@ static void updatebarpos(Monitor *m);
 static void updatebars(void);
 static void updateclientlist(void);
 static int updategeom(void);
+static void updateconfig(Monitor *m);
 static void updatenumlockmask(void);
 static void updatesizehints(Client *c);
 static void updatestatus(void);
@@ -410,6 +422,7 @@ arrange(Monitor *m)
 void
 arrangemon(Monitor *m)
 {
+	updateconfig(m);
 	updatebarpos(m);
 	XMoveResizeWindow(dpy, m->tabwin, m->wx, m->ty, m->ww, th);
 
@@ -539,6 +552,7 @@ cleanupmon(Monitor *mon)
 		for (m = mons; m && m->next != mon; m = m->next);
 		m->next = mon->next;
 	}
+	free(mon->config);
 	XUnmapWindow(dpy, mon->barwin);
 	XDestroyWindow(dpy, mon->barwin);
 	XUnmapWindow(dpy, mon->tabwin);
@@ -668,6 +682,7 @@ Monitor *
 createmon(void)
 {
 	Monitor *m;
+	int i;
 
 	m = ecalloc(1, sizeof(Monitor));
 	m->tagset[0] = m->tagset[1] = 1;
@@ -681,6 +696,19 @@ createmon(void)
 	m->lt[0] = &layouts[0];
 	m->lt[1] = &layouts[1 % LENGTH(layouts)];
 	strncpy(m->ltsymbol, layouts[0].symbol, sizeof m->ltsymbol);
+
+	m->config_id = 0;
+	m->config = ecalloc(LENGTH(tags) + 1, sizeof(Config));
+	for (i = 0; i <= LENGTH(tags); i++) {
+		m->config[i].nmaster = m->nmaster;
+		m->config[i].mfact = m->mfact;
+		m->config[i].sellt = m->sellt;
+		m->config[i].lt[0] = m->lt[0];
+		m->config[i].lt[1] = m->lt[1];
+		m->config[i].showbar = m->showbar;
+		m->config[i].showtab = m->showtab;
+	}
+
 	return m;
 }
 
@@ -2133,6 +2161,36 @@ updategeom(void)
 		selmon = wintomon(root);
 	}
 	return dirty;
+}
+
+void
+updateconfig(Monitor *m)
+{
+	unsigned int tagset = m->tagset[m->seltags];
+
+	m->config[m->config_id].nmaster = m->nmaster;
+	m->config[m->config_id].mfact = m->mfact;
+	m->config[m->config_id].sellt = m->sellt;
+	m->config[m->config_id].lt[0] = m->lt[0];
+	m->config[m->config_id].lt[1] = m->lt[1];
+	m->config[m->config_id].showbar = m->showbar;
+	m->config[m->config_id].showtab = m->showtab;
+
+	m->config_id = 0;
+	while (!(tagset & (1 << m->config_id)))
+		m->config_id++;
+	if (tagset ^ (1 << m->config_id))
+		m->config_id = LENGTH(tags);
+
+	m->nmaster = m->config[m->config_id].nmaster;
+	m->mfact = m->config[m->config_id].mfact;
+	m->sellt = m->config[m->config_id].sellt;
+	m->lt[0] = m->config[m->config_id].lt[0];
+	m->lt[1] = m->config[m->config_id].lt[1];
+	if (m->showbar != m->config[m->config_id].showbar)
+		togglebar(NULL);
+	if (m->showtab != m->config[m->config_id].showtab)
+		toggletab(NULL);
 }
 
 void
