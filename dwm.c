@@ -109,6 +109,12 @@ typedef struct {
 } Key;
 
 typedef struct {
+	const char *name;
+	Key *keys;
+	int size;
+} Keymap;
+
+typedef struct {
 	const char *symbol;
 	void (*arrange)(Monitor *);
 } Layout;
@@ -203,6 +209,7 @@ static void sendmon(Client *c, Monitor *m);
 static void setclientstate(Client *c, long state);
 static void setfocus(Client *c);
 static void setfullscreen(Client *c, int fullscreen);
+static void setkeymap(const Arg *arg);
 static void setlayout(const Arg *arg);
 static void setmfact(const Arg *arg);
 static void setup(void);
@@ -273,6 +280,8 @@ static Window root, wmcheckwin;
 
 /* configuration, allows nested code to access above variables */
 #include "config.h"
+
+static Keymap *active_keymap = &initial_keymap;
 
 /* compile-time check if all tags fit into an unsigned int bit array. */
 struct NumTags { char limitexceeded[LENGTH(tags) > 31 ? -1 : 1]; };
@@ -697,6 +706,7 @@ drawbar(Monitor *m)
 	int boxw = drw->fonts->h / 6 + 2;
 	unsigned int i, occ = 0, urg = 0;
 	Client *c;
+	char km_info[16];
 
 	if (!m->showbar)
 		return;
@@ -727,6 +737,10 @@ drawbar(Monitor *m)
 	w = TEXTW(m->ltsymbol);
 	drw_setscheme(drw, scheme[SchemeNorm]);
 	x = drw_text(drw, x, 0, w, bh, lrpad / 2, m->ltsymbol, 0);
+
+	snprintf(km_info, sizeof km_info, "(%s)", active_keymap->name);
+	w = TEXTW(km_info);
+	x = drw_text(drw, x, 0, w, bh, lrpad / 2, km_info, 0);
 
 	if ((w = m->ww - tw - x) > bh) {
 		if (m->sel) {
@@ -952,14 +966,22 @@ grabkeys(void)
 		unsigned int modifiers[] = { 0, LockMask, numlockmask, numlockmask|LockMask };
 		int start, end, skip;
 		KeySym *syms;
+		Key *keys = active_keymap->keys;
 
 		XUngrabKey(dpy, AnyKey, AnyModifier, root);
+
+		if (active_keymap != &initial_keymap) {
+			XGrabKey(dpy, AnyKey, AnyModifier, root,
+				True, GrabModeAsync, GrabModeAsync);
+			return;
+		}
+
 		XDisplayKeycodes(dpy, &start, &end);
 		syms = XGetKeyboardMapping(dpy, start, end - start + 1, &skip);
 		if (!syms)
 			return;
 		for (k = start; k <= end; k++)
-			for (i = 0; i < LENGTH(keys); i++)
+			for (i = 0; i < active_keymap->size; i++)
 				/* skip modifier codes, we do that ourselves */
 				if (keys[i].keysym == syms[(k - start) * skip])
 					for (j = 0; j < LENGTH(modifiers); j++)
@@ -996,14 +1018,24 @@ keypress(XEvent *e)
 	unsigned int i;
 	KeySym keysym;
 	XKeyEvent *ev;
+	Key *keys = active_keymap->keys;
+	Keymap *keymap = active_keymap;
 
 	ev = &e->xkey;
 	keysym = XKeycodeToKeysym(dpy, (KeyCode)ev->keycode, 0);
-	for (i = 0; i < LENGTH(keys); i++)
+	for (i = 0; i < active_keymap->size; i++)
 		if (keysym == keys[i].keysym
 		&& CLEANMASK(keys[i].mod) == CLEANMASK(ev->state)
 		&& keys[i].func)
 			keys[i].func(&(keys[i].arg));
+
+	if (active_keymap != &initial_keymap
+	&& active_keymap == keymap
+	&& !IsModifierKey(keysym)) {
+		active_keymap = &initial_keymap;
+		grabkeys();
+		drawbar(selmon);
+	}
 }
 
 void
@@ -1529,6 +1561,16 @@ setfullscreen(Client *c, int fullscreen)
 		c->h = c->oldh;
 		resizeclient(c, c->x, c->y, c->w, c->h);
 		arrange(c->mon);
+	}
+}
+
+void
+setkeymap(const Arg *arg)
+{
+	if (arg) {
+		active_keymap = (Keymap *)arg->v;
+		grabkeys();
+		drawbar(selmon);
 	}
 }
 

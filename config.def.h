@@ -97,6 +97,12 @@ static const Key keys[] = {
 	{ MODKEY|ShiftMask,             XK_q,      quit,           {0} },
 };
 
+static Keymap initial_keymap = {
+	"",
+	keys,
+	LENGTH(keys),
+};
+
 /* button definitions */
 /* click can be ClkTagBar, ClkLtSymbol, ClkStatusText, ClkWinTitle, ClkClientWin, or ClkRootWin */
 static const Button buttons[] = {
