@@ -97,6 +97,8 @@ struct Client {
 	Client *snext;
 	Monitor *mon;
 	Window win;
+	char *class;
+	char *instance;
 };
 
 typedef struct {
@@ -194,6 +196,7 @@ static void resizeclient(Client *c, int x, int y, int w, int h);
 static void resizemouse(const Arg *arg);
 static void restack(Monitor *m);
 static void run(void);
+static void runorraise(const Arg *arg);
 static void scan(void);
 static int sendevent(Client *c, Atom proto);
 static void sendmon(Client *c, Monitor *m);
@@ -235,7 +238,7 @@ static int xerrorstart(Display *dpy, XErrorEvent *ee);
 static void zoom(const Arg *arg);
 
 /* variables */
-static const char broken[] = "broken";
+static char broken[] = "broken";
 static char stext[256];
 static int screen;
 static int sw, sh;           /* X display screen geometry width, height */
@@ -278,24 +281,19 @@ struct NumTags { char limitexceeded[LENGTH(tags) > 31 ? -1 : 1]; };
 void
 applyrules(Client *c)
 {
-	const char *class, *instance;
 	unsigned int i;
 	const Rule *r;
 	Monitor *m;
-	XClassHint ch = { NULL, NULL };
 
 	/* rule matching */
 	c->isfloating = 0;
 	c->tags = 0;
-	XGetClassHint(dpy, c->win, &ch);
-	class    = ch.res_class ? ch.res_class : broken;
-	instance = ch.res_name  ? ch.res_name  : broken;
 
 	for (i = 0; i < LENGTH(rules); i++) {
 		r = &rules[i];
 		if ((!r->title || strstr(c->name, r->title))
-		&& (!r->class || strstr(class, r->class))
-		&& (!r->instance || strstr(instance, r->instance)))
+		&& (!r->class || strstr(c->class, r->class))
+		&& (!r->instance || strstr(c->instance, r->instance)))
 		{
 			c->isfloating = r->isfloating;
 			c->tags |= r->tags;
@@ -304,10 +302,6 @@ applyrules(Client *c)
 				c->mon = m;
 		}
 	}
-	if (ch.res_class)
-		XFree(ch.res_class);
-	if (ch.res_name)
-		XFree(ch.res_name);
 	c->tags = c->tags & TAGMASK ? c->tags & TAGMASK : c->mon->tagset[c->mon->seltags];
 }
 
@@ -1034,6 +1028,7 @@ manage(Window w, XWindowAttributes *wa)
 	Client *c, *t = NULL;
 	Window trans = None;
 	XWindowChanges wc;
+	XClassHint ch = { NULL, NULL };
 
 	c = ecalloc(1, sizeof(Client));
 	c->win = w;
@@ -1043,6 +1038,10 @@ manage(Window w, XWindowAttributes *wa)
 	c->w = c->oldw = wa->width;
 	c->h = c->oldh = wa->height;
 	c->oldbw = wa->border_width;
+
+	XGetClassHint(dpy, c->win, &ch);
+	c->class    = ch.res_class ? ch.res_class : broken;
+	c->instance = ch.res_name  ? ch.res_name  : broken;
 
 	updatetitle(c);
 	if (XGetTransientForHint(dpy, w, &trans) && (t = wintoclient(trans))) {
@@ -1388,6 +1387,32 @@ run(void)
 	while (running && !XNextEvent(dpy, &ev))
 		if (handler[ev.type])
 			handler[ev.type](&ev); /* call handler */
+}
+
+void
+runorraise(const Arg *arg)
+{
+	char **args = ((char **)arg->v);
+	char *class = args[0];
+	char *instance = args[1];
+	Monitor *m;
+	Client *c;
+	Arg sarg;
+
+	for (m = mons; m; m = m->next)
+		for (c = m->clients; c; c = c->next) {
+			if ((!class || strstr(c->class, class))
+			&& (!instance || strstr(c->instance, instance))) {
+				if (!ISVISIBLE(c))
+					m->tagset[m->seltags] = c->tags & (~c->tags + 1);
+				focus(c);
+				arrange(m);
+				return;
+			}
+		}
+
+	sarg.v = &args[2];
+	spawn(&sarg);
 }
 
 void
@@ -1795,6 +1820,10 @@ unmanage(Client *c, int destroyed)
 		XSetErrorHandler(xerror);
 		XUngrabServer(dpy);
 	}
+	if (c->class != broken)
+		XFree(c->class);
+	if (c->instance != broken)
+		XFree(c->instance);
 	free(c);
 	focus(NULL);
 	updateclientlist();
