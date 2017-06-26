@@ -119,7 +119,18 @@ typedef struct {
 	void (*arrange)(Monitor *);
 } Layout;
 
+typedef struct {
+	int nmaster;
+	float mfact;
+	unsigned int sellt;
+	const Layout *lt[2];
+	int showbar;
+	int showtab;
+} Config;
+
 struct Monitor {
+	unsigned int cur_config;
+	Config *config;
 	char ltsymbol[16];
 	float mfact;
 	int nmaster;
@@ -241,6 +252,7 @@ static void updatebarpos(Monitor *m);
 static void updatebars(void);
 static void updateclientlist(void);
 static int updategeom(void);
+static void updateconfig(Monitor *m);
 static void updatenumlockmask(void);
 static void updatesizehints(Client *c);
 static void updatestatus(void);
@@ -409,6 +421,7 @@ arrange(Monitor *m)
 void
 arrangemon(Monitor *m)
 {
+	updateconfig(m);
 	updatebarpos(m);
 	XMoveResizeWindow(dpy, m->tabwin, m->wx, m->ty, m->ww, th);
 
@@ -537,6 +550,7 @@ cleanupmon(Monitor *mon)
 		for (m = mons; m && m->next != mon; m = m->next);
 		m->next = mon->next;
 	}
+	free(mon->config);
 	XUnmapWindow(dpy, mon->barwin);
 	XDestroyWindow(dpy, mon->barwin);
 	XUnmapWindow(dpy, mon->tabwin);
@@ -666,6 +680,7 @@ Monitor *
 createmon(void)
 {
 	Monitor *m;
+	int i;
 
 	m = ecalloc(1, sizeof(Monitor));
 	m->tagset[0] = m->tagset[1] = 1;
@@ -679,6 +694,19 @@ createmon(void)
 	m->lt[0] = &layouts[0];
 	m->lt[1] = &layouts[1 % LENGTH(layouts)];
 	strncpy(m->ltsymbol, layouts[0].symbol, sizeof m->ltsymbol);
+
+	m->cur_config = 0;
+	m->config = ecalloc(LENGTH(tags) + 1, sizeof(Config));
+	for (i = 0; i <= LENGTH(tags); i++) {
+		m->config[i].nmaster = m->nmaster;
+		m->config[i].mfact = m->mfact;
+		m->config[i].sellt = m->sellt;
+		m->config[i].lt[0] = m->lt[0];
+		m->config[i].lt[1] = m->lt[1];
+		m->config[i].showbar = m->showbar;
+		m->config[i].showtab = m->showtab;
+	}
+
 	return m;
 }
 
@@ -1072,6 +1100,7 @@ void
 incnmaster(const Arg *arg)
 {
 	selmon->nmaster = MAX(selmon->nmaster + arg->i, 0);
+	selmon->config[selmon->cur_config].nmaster = selmon->nmaster;
 	arrange(selmon);
 }
 
@@ -1659,10 +1688,14 @@ setkeymap(const Arg *arg)
 void
 setlayout(const Arg *arg)
 {
-	if (!arg || !arg->v || arg->v != selmon->lt[selmon->sellt])
+	if (!arg || !arg->v || arg->v != selmon->lt[selmon->sellt]) {
 		selmon->sellt ^= 1;
-	if (arg && arg->v)
+		selmon->config[selmon->cur_config].sellt = selmon->sellt;
+	}
+	if (arg && arg->v) {
 		selmon->lt[selmon->sellt] = (Layout *)arg->v;
+		selmon->config[selmon->cur_config].lt[selmon->sellt] = selmon->lt[selmon->sellt];
+	}
 	strncpy(selmon->ltsymbol, selmon->lt[selmon->sellt]->symbol, sizeof selmon->ltsymbol);
 	if (selmon->sel)
 		arrange(selmon);
@@ -1682,6 +1715,7 @@ setmfact(const Arg *arg)
 	if (f < 0.05 || f > 0.95)
 		return;
 	selmon->mfact = f;
+	selmon->config[selmon->cur_config].mfact = selmon->mfact;
 	arrange(selmon);
 }
 
@@ -1862,6 +1896,7 @@ void
 togglebar(const Arg *arg)
 {
 	selmon->showbar = !selmon->showbar;
+	selmon->config[selmon->cur_config].showbar = selmon->showbar;
 	updatebarpos(selmon);
 	XMoveResizeWindow(dpy, selmon->barwin, selmon->wx, selmon->by, selmon->ww, bh);
 	arrange(selmon);
@@ -1885,6 +1920,7 @@ void
 toggletab(const Arg *arg)
 {
 	selmon->showtab = !selmon->showtab;
+	selmon->config[selmon->cur_config].showtab = selmon->showtab;
 	arrange(selmon);
 }
 
@@ -2120,6 +2156,29 @@ updategeom(void)
 		selmon = wintomon(root);
 	}
 	return dirty;
+}
+
+void
+updateconfig(Monitor *m)
+{
+	unsigned int tagset = m->tagset[m->seltags];
+
+	m->cur_config = 0;
+	while (!(tagset & (1 << m->cur_config)))
+		m->cur_config++;
+
+	if (tagset ^ (1 << m->cur_config))
+		m->cur_config = LENGTH(tags);
+
+	m->nmaster = m->config[m->cur_config].nmaster;
+	m->mfact = m->config[m->cur_config].mfact;
+	m->sellt = m->config[m->cur_config].sellt;
+	m->lt[0] = m->config[m->cur_config].lt[0];
+	m->lt[1] = m->config[m->cur_config].lt[1];
+	if (m->showbar != m->config[m->cur_config].showbar)
+		togglebar(NULL);
+	if (m->showtab != m->config[m->cur_config].showtab)
+		toggletab(NULL);
 }
 
 void
