@@ -57,6 +57,12 @@
 #define TAGMASK                 ((1 << LENGTH(tags)) - 1)
 #define TEXTW(X)                (drw_fontset_getwidth(drw, (X)) + lrpad)
 
+#ifdef __APPLE__
+#define PROOT 1
+#else
+#define PROOT 0
+#endif
+
 /* enums */
 enum { CurNormal, CurResize, CurMove, CurLast }; /* cursor */
 enum { SchemeNorm, SchemeSel }; /* color schemes */
@@ -151,6 +157,7 @@ struct Monitor {
 	Client *sel;
 	Client *stack;
 	Monitor *next;
+	Window proot;
 	Window barwin;
 	Window tabwin;
 	int tab_width;
@@ -554,6 +561,10 @@ cleanupmon(Monitor *mon)
 		m->next = mon->next;
 	}
 	free(mon->config);
+	if (PROOT) {
+		XUnmapWindow(dpy, mon->proot);
+		XDestroyWindow(dpy, mon->proot);
+	}
 	XUnmapWindow(dpy, mon->barwin);
 	XDestroyWindow(dpy, mon->barwin);
 	XUnmapWindow(dpy, mon->tabwin);
@@ -619,6 +630,8 @@ configurenotify(XEvent *e)
 				for (c = m->clients; c; c = c->next)
 					if (c->isfullscreen)
 						resizeclient(c, m->mx, m->my, m->mw, m->mh);
+				if (PROOT)
+					XMoveResizeWindow(dpy, m->proot, m->mx, m->my, m->mw, m->mh);
 				XMoveResizeWindow(dpy, m->barwin, m->wx, m->by, m->ww, bh);
 			}
 			focus(NULL);
@@ -2028,6 +2041,13 @@ updatebars(void)
 	for (m = mons; m; m = m->next) {
 		if (m->barwin)
 			continue;
+		if (PROOT) {
+			m->proot = XCreateWindow(dpy, root, m->mx, m->my, m->mw, m->mh, 0, DefaultDepth(dpy, screen),
+					CopyFromParent, DefaultVisual(dpy, screen),
+					CWOverrideRedirect|CWBackPixmap, &wa);
+			XDefineCursor(dpy, m->proot, cursor[CurNormal]->cursor);
+			XMapRaised(dpy, m->proot);
+		}
 		m->barwin = XCreateWindow(dpy, root, m->wx, m->by, m->ww, bh, 0, DefaultDepth(dpy, screen),
 				CopyFromParent, DefaultVisual(dpy, screen),
 				CWOverrideRedirect|CWBackPixmap|CWEventMask, &wa);
